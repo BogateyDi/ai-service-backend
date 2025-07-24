@@ -14,6 +14,6 @@
     "express": "^4.19.2",
     "mammoth": "^1.9.1",
     "xlsx": "^0.18.5",
-    "yookassa": "^1.1.1"
+    "yookassa": "^0.1.1"
   }
 }
