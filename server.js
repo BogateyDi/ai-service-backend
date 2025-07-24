@@ -4,6 +4,8 @@ import dotenv from 'dotenv';
 import { GoogleGenAI, Type } from "@google/genai";
 import mammoth from "mammoth";
 import * as xlsx from "xlsx";
+import YooKassa from 'yookassa';
+import crypto from 'crypto';
 
 dotenv.config();
 
@@ -213,6 +215,93 @@ const corsOptions = {
 
 app.use(cors(corsOptions));
 app.use(express.json({ limit: '10mb' })); // Increased limit for base64 files
+
+
+// #region YooKassa Payment Integration
+const yookassa = new YooKassa({
+    shopId: process.env.YOOKASSA_SHOP_ID,
+    secretKey: process.env.YOOKASSA_SECRET_KEY
+});
+
+const PRICES = {
+    'Стартовый': { value: '19.00', currency: 'RUB' },
+    'Продвинутый': { value: '295.00', currency: 'RUB' },
+    'Эксперт': { value: '975.00', currency: 'RUB' },
+    'mirra': { value: '500.00', currency: 'RUB' },
+    'dary': { value: '500.00', currency: 'RUB' },
+};
+
+app.post('/api/create-payment', async (req, res) => {
+    try {
+        const { item, userCode } = req.body;
+        const idempotenceKey = crypto.randomUUID();
+        const returnUrl = process.env.FRONTEND_URL || 'http://localhost:3000';
+
+        let price;
+        let description;
+        let metadata;
+
+        if (item.name && item.generations) { // GenerationPackage
+            price = PRICES[item.name];
+            description = `AI - Помощник: Пакет "${item.name}" (${item.generations} генераций)`;
+            metadata = {
+                purchaseType: 'package',
+                packageName: item.name,
+                generations: item.generations,
+                userCode: userCode || null,
+            };
+        } else if (item.assistant) { // Assistant purchase
+            price = PRICES[item.assistant];
+            description = `AI - Помощник: Ассистент "${item.assistant === 'mirra' ? 'Миррая' : 'Дарий'}"`;
+            metadata = {
+                purchaseType: 'assistant',
+                assistantType: item.assistant,
+                userCode: userCode || null,
+            };
+        }
+
+        if (!price) {
+            return res.status(400).json({ error: 'Invalid item for purchase.' });
+        }
+
+        const payment = await yookassa.createPayment({
+            amount: price,
+            payment_method_data: { type: 'bank_card' },
+            confirmation: { type: 'redirect', return_url: returnUrl },
+            capture: true,
+            description: description,
+            metadata: metadata,
+        }, idempotenceKey);
+
+        res.json({ confirmationUrl: payment.confirmation.confirmation_url, paymentId: payment.id });
+
+    } catch (error) {
+        console.error('YooKassa Create Payment Error:', error);
+        res.status(500).json({ error: error.message || 'Failed to create payment' });
+    }
+});
+
+app.get('/api/check-payment', async (req, res) => {
+    try {
+        const { paymentId } = req.query;
+        if (!paymentId) {
+            return res.status(400).json({ error: 'Payment ID is required.' });
+        }
+
+        const payment = await yookassa.getPayment(paymentId);
+
+        if (payment.status === 'succeeded') {
+            res.json({ status: payment.status, metadata: payment.metadata });
+        } else {
+            res.json({ status: payment.status, metadata: null });
+        }
+    } catch (error) {
+        console.error('YooKassa Check Payment Error:', error);
+        res.status(500).json({ error: error.message || 'Failed to check payment' });
+    }
+});
+// #endregion
+
 
 const getSystemInstruction = (docType) => {
     const LifeDocTypes = ['DOCUMENT_ANALYSIS', 'CONSULTATION', 'ASTROLOGY', 'PERSONAL_ANALYSIS', 'FORECASTING'];
