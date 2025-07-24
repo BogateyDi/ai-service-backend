@@ -208,10 +208,25 @@ if (!process.env.API_KEY) {
 const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
 const model = 'gemini-2.5-flash';
 
+const allowedOrigins = [
+  process.env.FRONTEND_URL, // This should be https://ai-pomochik.netlify.app
+  'https://aipomochnik.ru',   // The user's custom domain
+  'http://localhost:3000'    // For local development
+].filter(Boolean); // Filter out undefined/null values if FRONTEND_URL is not set
+
 const corsOptions = {
-    origin: process.env.FRONTEND_URL || 'http://localhost:3000',
-    optionsSuccessStatus: 200
+  origin: function (origin, callback) {
+    // allow requests with no origin (like mobile apps or curl requests)
+    if (!origin) return callback(null, true);
+    if (allowedOrigins.indexOf(origin) !== -1) {
+      return callback(null, true);
+    }
+    const msg = 'The CORS policy for this site does not allow access from the specified Origin.';
+    return callback(new Error(msg), false);
+  },
+  optionsSuccessStatus: 200
 };
+
 
 app.use(cors(corsOptions));
 app.use(express.json({ limit: '10mb' })); // Increased limit for base64 files
